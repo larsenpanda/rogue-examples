@@ -1,0 +1,79 @@
+version: '3.7'
+name: rp-console-sasl-512
+networks:
+  redpanda_network:
+services:
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v22.3.11
+    command:
+      - redpanda start
+      - --set redpanda.enable_sasl=true
+      - --set redpanda.superusers=["admin"]
+      - --smp 1
+      - --overprovisioned
+      - --node-id 0
+      - --kafka-addr PLAINTEXT://0.0.0.0:29092,OUTSIDE://0.0.0.0:9092
+      - --advertise-kafka-addr PLAINTEXT://redpanda:29092,OUTSIDE://127.0.0.1:9092
+      - --pandaproxy-addr 0.0.0.0:8082
+      - --advertise-pandaproxy-addr redpanda:8082
+      - --set schema_registry_client.sasl_mechanism=SCRAM-SHA-512
+      - --set schema_registry_client.scram_username=admin
+      - --set schema_registry_client.scram_password=rp123
+      - '--set schema_registry_client.brokers={"address":"redpanda","port":29092}'
+      - --set pandaproxy_client.sasl_mechanism=SCRAM-SHA-512
+      - --set pandaproxy_client.scram_username=admin
+      - --set pandaproxy_client.scram_password=rp123
+      - '--set pandaproxy_client.brokers={"address":"redpanda","port":29092}'
+    container_name: redpanda
+    hostname: redpanda
+    networks:
+      - redpanda_network
+    ports:
+      - 8081:8081
+      - 8082:8082
+      - 9092:9092
+      - 9644:9644
+      - 29092:29092
+  redpandarpk:
+    command:
+      - acl
+      - user
+      - create
+      - admin
+      - -p
+      - rp123
+      - --mechanism
+      - 'SCRAM-SHA-512'
+      - --api-urls redpanda:9644
+    image: docker.redpanda.com/redpandadata/redpanda:v22.3.11
+    container_name: redpanda2
+    restart: on-failure:4
+    networks:
+      - redpanda_network
+    depends_on:
+      - 'redpanda'
+  console:
+    networks:
+      - redpanda_network
+    image: docker.redpanda.com/redpandadata/console:v2.2.0
+    restart: on-failure
+    entrypoint: /bin/sh
+    command: -c "echo \"$$CONSOLE_CONFIG_FILE\" > /tmp/config.yml; /app/console"
+    environment:
+      CONFIG_FILEPATH: /tmp/config.yml
+      CONSOLE_CONFIG_FILE: |
+        kafka:
+          brokers: ["redpanda:29092"]
+          sasl:
+            enabled: true
+            username: admin
+            password: rp123
+            mechanism: SCRAM-SHA-512
+          schemaRegistry:
+            enabled: true
+            urls: ["http://redpanda:8081"]
+    ports:
+      - "8080:8080"
+    restart: on-failure
+    depends_on:
+      - redpandarpk
